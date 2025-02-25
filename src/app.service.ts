@@ -43,13 +43,14 @@ export class AppService {
             videoTitle = info.videoDetails.title.trim().replace(/[^a-zA-Z0-9]/g, "_");
           });
 
-          // Download a video
-          await ytdl(querystring.url, { quality: quality || 'highest' }).pipe(require("fs").createWriteStream(`${videoTitle}.mp4`));
-
           // Get video info with download formats
-          // ytdl.getInfo("http://www.youtube.com/watch?v=aqz-KE-bpKQ").then(info => {
-          //   console.log(info.formats);
-          // });
+          await ytdl.getInfo(querystring.url).then(info => {
+            console.log(info.formats);
+          });
+
+          // Download a video
+          await ytdl(querystring.url).pipe(require("fs").createWriteStream(`${videoTitle}.mp4`));
+
 
           return new Promise((resolve, reject) => {
             return resolve('success');
