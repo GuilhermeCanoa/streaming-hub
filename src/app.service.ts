@@ -4,8 +4,6 @@ import ytdl from "@distube/ytdl-core";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegStatic from "ffmpeg-static"; // Provides a static FFmpeg binary
 
-// TODO FAZER BAIXAR COM QUALIDADE BOA
-// PARAR DE QUEBRAR A APLICAÇÃO QUANDO DER ERRO
 
 @Injectable()
 export class AppService {
@@ -16,76 +14,91 @@ export class AppService {
   ]
 
   mergeAudioAndVideo(videosToBeMerged: string[]): Promise<string> {
-
-    const videoPath = videosToBeMerged.find(v => v.indexOf('_video') !== -1);
-    const audioPath = videosToBeMerged.find(v => v.indexOf('_audio') !== -1);
-    const outputPath = videoPath.replace('_video', '_merged');
+    try {
+      const videoPath = videosToBeMerged.find(v => v.indexOf('_video') !== -1);
+      const audioPath = videosToBeMerged.find(v => v.indexOf('_audio') !== -1);
+      const outputPath = videoPath.replace('_video', '_merged');
   
-    ffmpeg.setFfmpegPath(ffmpegStatic as string); // Set static ffmpeg path
-    return new Promise((resolve, reject) => {
-      ffmpeg()
-        .input(videoPath)
-        .input(audioPath)
-        .outputOptions(["-c:v copy", "-c:a aac"])
-        .save(outputPath)
-        .on("end", () => {
-          console.log("Merge completed!");
-          fs.unlinkSync(videoPath);
-          fs.unlinkSync(audioPath);
-          resolve(`Download and merge completed: ${outputPath}`);
-        })
-        .on("error", err => {
-          console.error("FFmpeg error:", err);
-          reject(`FFmpeg error: ${err.message}`);
-        });
-    });
+      // check if the files already exists
+      if (fs.existsSync(outputPath)) {
+        return Promise.resolve(`File already exists: ${outputPath}`);
+      }
+    
+      ffmpeg.setFfmpegPath(ffmpegStatic as string); // Set static ffmpeg path
+      return new Promise((resolve, reject) => {
+        ffmpeg()
+          .input(videoPath)
+          .input(audioPath)
+          .outputOptions(["-c:v copy", "-c:a aac"])
+          .save(outputPath)
+          .on("end", () => {
+            console.log("Merge completed!");
+            // fs.unlinkSync(videoPath);
+            // fs.unlinkSync(audioPath);
+            resolve(`Download and merge completed: ${outputPath}`);
+          })
+          .on("error", err => {
+            console.error("FFmpeg error:", err);
+            reject(`FFmpeg error: ${err.message}`);
+          });
+      });
+    } catch (error) {
+      console.log('error', error);
+      error.message = 'Failed to merge audio and video';
+      throw error;
+    } 
   }
 
   selectVideoFormats(formats: ytdl.videoFormat[]): ytdl.videoFormat[] {
+    try{
+      const response : ytdl.videoFormat[] = [];
 
-    const response : ytdl.videoFormat[] = [];
-
-    // Filter video formats with audio and video
-    const formatsWithAudioAndVideo = formats.filter((format) =>
-      format.hasAudio
-      && format.hasVideo
-    )
-
-    response.push(formatsWithAudioAndVideo[0]); // pelo menos ter 1 video completo pra baixar sempre
-
-    const HDVideoWithAudioAndVideo = formatsWithAudioAndVideo.find(format =>
-      this.HDQualityLabels.includes(format.qualityLabel)
-      && format.mimeType === 'video/mp4'
-    )
-
-    if (HDVideoWithAudioAndVideo !== undefined) {
-      // Already got the HD video with audio and video, return format
-      response.push(HDVideoWithAudioAndVideo);
+      // Filter video formats with audio and video
+      const formatsWithAudioAndVideo = formats.filter((format) =>
+        format.hasAudio
+        && format.hasVideo
+      )
+  
+      response.push(formatsWithAudioAndVideo[0]); // pelo menos ter 1 video completo pra baixar sempre
+  
+      const HDVideoWithAudioAndVideo = formatsWithAudioAndVideo.find(format =>
+        this.HDQualityLabels.includes(format.qualityLabel)
+        && format.mimeType === 'video/mp4'
+      )
+  
+      if (HDVideoWithAudioAndVideo !== undefined) {
+        // Already got the HD video with audio and video, return format
+        response.push(HDVideoWithAudioAndVideo);
+        return response;
+      }
+  
+      // se nao tem video em HD com audio e video, pegar um video em HD separado, depois pegar um audio em HD separado e juntar os dois
+      const HDVideo = formats.find( format =>
+        this.HDQualityLabels.includes(format.qualityLabel)
+        && format.hasVideo
+        && !format.hasAudio
+        && format.container === 'mp4'
+        && format.codecs.indexOf('avc1') !== -1 //unico formato que rodou no meu player! usar ele sempre
+      )
+      const HDAudio = formats.find( format =>
+        format.mimeType.indexOf('audio/mp4;') !== -1
+        // && format.approxDurationMs === HDVideo.approxDurationMs
+        && !format.hasVideo
+        && format.hasAudio
+      )
+  
+      if (HDVideo !== undefined && HDAudio !== undefined) {
+        response.push(HDVideo);
+        response.push(HDAudio);
+        return response;
+      }
+      
       return response;
+    } catch (error) {
+      console.log('error', error);
+      error.message = 'Failed to select video formats';
+      throw error;
     }
-
-    // se nao tem video em HD com audio e video, pegar um video em HD separado, depois pegar um audio em HD separado e juntar os dois
-    const HDVideo = formats.find( format =>
-      this.HDQualityLabels.includes(format.qualityLabel)
-      && format.hasVideo
-      && !format.hasAudio
-      && format.container === 'mp4'
-      && format.codecs.indexOf('avc1') !== -1 //unico formato que rodou no meu player! usar ele sempre
-    )
-    const HDAudio = formats.find( format =>
-      format.mimeType.indexOf('audio/mp4;') !== -1
-      // && format.approxDurationMs === HDVideo.approxDurationMs
-      && !format.hasVideo
-      && format.hasAudio
-    )
-
-    if (HDVideo !== undefined && HDAudio !== undefined) {
-      response.push(HDVideo);
-      response.push(HDAudio);
-      return response;
-    }
-    
-    return response;
   }
 
   async downloadVideoYTDL(url:string, options: { format?: ytdl.videoFormat }): Promise<string> {
@@ -143,7 +156,7 @@ export class AppService {
           }
 
           if (videosToBeMerged.length > 0) {
-            this.mergeAudioAndVideo(videosToBeMerged);
+            await this.mergeAudioAndVideo(videosToBeMerged);
           }
 
           return new Promise((resolve, reject) => {
@@ -151,7 +164,10 @@ export class AppService {
           })
     }
     catch (error) {
-      throw new Error(`Failed to download video: ${error.message}`);
+      return new Promise((resolve, reject) => {
+        error.message = `Failed at downloadVideoYTDL ${error.message}`;
+        return reject(error);
+      })
     }
   }
 
@@ -170,7 +186,10 @@ export class AppService {
         return resolve('success');
       })
     } catch (error) {
-      throw new Error(`Failed to download video: ${error.message}`);
+      return new Promise((resolve, reject) => {
+        error.message = `Failed at downloadMultipleVideo ${error.message}`;
+        return reject(error);
+      })
     }
   }
 
@@ -184,7 +203,10 @@ export class AppService {
         return resolve(response);
       })
     } catch (error) {
-      throw new Error(`Failed to download video: ${error.message}`);
+      return new Promise((resolve, reject) => {
+        error.message = `Failed at downloadVideo ${error.message}`;
+        return reject(error);
+      })
     }
   }
 }
