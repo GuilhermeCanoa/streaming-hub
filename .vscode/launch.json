@@ -11,7 +11,7 @@
             "runtimeExecutable": "npm",
             "runtimeArgs": [
               "run",
-              "start:debug",
+              "start",
               "--",
               "--inspect-brk"
             ],

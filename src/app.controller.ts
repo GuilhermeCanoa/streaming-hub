@@ -5,11 +5,6 @@ import { AppService } from './app.service';
 export class AppController {
   constructor(private readonly appService: AppService) {}
 
-  @Get()
-  getHello(): string {
-    return this.appService.getHello();
-  }
-
   @Get('video/download')
   downloadVideo(@Query() query: any): Promise<string> {
     return this.appService.downloadVideo(query);
