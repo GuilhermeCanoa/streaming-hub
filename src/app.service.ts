@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import * as fs from 'fs';
 import ytdl from "@distube/ytdl-core";
+import ffmpeg from "fluent-ffmpeg";
+import ffmpegStatic from "ffmpeg-static"; // Provides a static FFmpeg binary
 
 // TODO FAZER BAIXAR COM QUALIDADE BOA
 // PARAR DE QUEBRAR A APLICAÇÃO QUANDO DER ERRO
@@ -12,6 +14,32 @@ export class AppService {
     '1080p',
     '720p'
   ]
+
+  mergeAudioAndVideo(videosToBeMerged: string[]): Promise<string> {
+
+    const videoPath = videosToBeMerged.find(v => v.indexOf('_video') !== -1);
+    const audioPath = videosToBeMerged.find(v => v.indexOf('_audio') !== -1);
+    const outputPath = videoPath.replace('_video', '_merged');
+  
+    ffmpeg.setFfmpegPath(ffmpegStatic as string); // Set static ffmpeg path
+    return new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(videoPath)
+        .input(audioPath)
+        .outputOptions(["-c:v copy", "-c:a aac"])
+        .save(outputPath)
+        .on("end", () => {
+          console.log("Merge completed!");
+          fs.unlinkSync(videoPath);
+          fs.unlinkSync(audioPath);
+          resolve(`Download and merge completed: ${outputPath}`);
+        })
+        .on("error", err => {
+          console.error("FFmpeg error:", err);
+          reject(`FFmpeg error: ${err.message}`);
+        });
+    });
+  }
 
   selectVideoFormats(formats: ytdl.videoFormat[]): ytdl.videoFormat[] {
 
@@ -74,22 +102,48 @@ export class AppService {
 
           const selectedFormats = this.selectVideoFormats(info.formats)
 
+          const videosToBeMerged = [];
+
           for (const format of selectedFormats) {
             options.format = format;
-            console.log('Downloading video with format:', format);
+            // console.log('Downloading video with format:', format);
             
             const videoTitleFile = videoTitle
             + (format.hasVideo ? '_video' : '')
             + (format.hasAudio ? '_audio' : '')
-            + (format.qualityLabel ? '_'+ format.qualityLabel : '');
+            + (format.qualityLabel ? '_'+ format.qualityLabel : '')
+            + '.mp4';
 
-            const writeStream = fs.createWriteStream(`${videoTitleFile}.mp4`);
+            // a code to check if the file already exits and then avoid downloading it again
+            if (fs.existsSync(videoTitleFile)) {
+              console.log(`File ${videoTitleFile} already exists, skipping download`);
+              if (!format.hasVideo || !format.hasAudio) {
+                videosToBeMerged.push(videoTitleFile);
+                console.log(`File ${videoTitleFile} added to merge process`);
+              }
+              continue;
+            }
+
+            const writeStream = fs.createWriteStream(`${videoTitleFile}`);
             ytdl(url, options).pipe(writeStream);
 
             await new Promise((resolve, reject) => {
-              writeStream.on('finish', resolve);
+              writeStream.on('finish', () => {
+                console.log(`Download of ${videoTitleFile} finished !`);
+                resolve('success');
+              });
               writeStream.on('error', reject);
             });
+
+            if (!format.hasVideo || !format.hasAudio) {
+              videosToBeMerged.push(videoTitleFile);
+              console.log(`File ${videoTitleFile} added to merge process`);
+            }
+
+          }
+
+          if (videosToBeMerged.length > 0) {
+            this.mergeAudioAndVideo(videosToBeMerged);
           }
 
           return new Promise((resolve, reject) => {
