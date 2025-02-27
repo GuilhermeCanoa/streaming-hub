@@ -12,7 +12,6 @@ export class AppController {
   
   @Get('video/downloadMultiple')
   downloadMultipleVideo(@Query() query: any): Promise<string> {
-
     return this.appService.downloadMultipleVideo(query);
   }
 }

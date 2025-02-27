@@ -4,16 +4,53 @@ import ytdl from "@distube/ytdl-core";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegStatic from "ffmpeg-static"; // Provides a static FFmpeg binary
 
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { createReadStream } from 'fs';
 
 @Injectable()
 export class AppService {
+
+  async uploadToS3(filePath: string, bucketName: string): Promise<string> {
+    try {
+      const s3Client = new S3Client({
+        region: process.env.AWS_REGION || 'sa-east-1'
+      });
+
+      const fileStream = createReadStream(filePath);
+      const fileName = filePath.split('/').pop();
+
+      const command = new PutObjectCommand({
+        Bucket: bucketName,
+        Key: `videos/${fileName}`,
+        Body: fileStream
+      });
+
+      await s3Client.send(command);
+      
+      return `https://${bucketName}.s3.amazonaws.com/videos/${fileName}`;
+
+    } catch (error) {
+      console.error('Error uploading to S3:', error);
+      throw new Error(`Failed to upload ${filePath} to S3`);
+    }
+  }
+
+  async uploadMultipleToS3(filePaths: string[], bucketName: string): Promise<string[]> {
+    try {
+      const uploadPromises = filePaths.map(filePath => this.uploadToS3(filePath, bucketName));
+      return await Promise.all(uploadPromises);
+    } catch (error) {
+      console.error('Error uploading multiple files to S3:', error);
+      throw new Error('Failed to upload multiple files to S3');
+    }
+  }
 
   HDQualityLabels: string[] = [
     '1080p',
     '720p'
   ]
 
-  mergeAudioAndVideo(videosToBeMerged: string[]): Promise<string> {
+  async mergeAudioAndVideo(videosToBeMerged: string[]): Promise<string> {
     try {
       const videoPath = videosToBeMerged.find(v => v.indexOf('_video') !== -1);
       const audioPath = videosToBeMerged.find(v => v.indexOf('_audio') !== -1);
@@ -21,7 +58,7 @@ export class AppService {
   
       // check if the files already exists
       if (fs.existsSync(outputPath)) {
-        return Promise.resolve(`File already exists: ${outputPath}`);
+        return `${outputPath}`;
       }
     
       ffmpeg.setFfmpegPath(ffmpegStatic as string); // Set static ffmpeg path
@@ -35,11 +72,12 @@ export class AppService {
             console.log("Merge completed!");
             // fs.unlinkSync(videoPath);
             // fs.unlinkSync(audioPath);
-            resolve(`Download and merge completed: ${outputPath}`);
+            console.log(`Download and merge completed: ${outputPath}`);
+            resolve(`${outputPath}`);
           })
           .on("error", err => {
             console.error("FFmpeg error:", err);
-            reject(`FFmpeg error: ${err.message}`);
+            reject(err);
           });
       });
     } catch (error) {
@@ -101,7 +139,7 @@ export class AppService {
     }
   }
 
-  async downloadVideoYTDL(url:string, options: { format?: ytdl.videoFormat }): Promise<string> {
+  async downloadVideoYTDL(url:string, options: { format?: ytdl.videoFormat }): Promise<string[]> {
     try {
           // Get video info
           let videoTitle = ';'
@@ -116,52 +154,58 @@ export class AppService {
           const selectedFormats = this.selectVideoFormats(info.formats)
 
           const videosToBeMerged = [];
+          const videosReady = [];
 
           for (const format of selectedFormats) {
             options.format = format;
             // console.log('Downloading video with format:', format);
             
-            const videoTitleFile = videoTitle
+            const videoPathFile = videoTitle
             + (format.hasVideo ? '_video' : '')
             + (format.hasAudio ? '_audio' : '')
             + (format.qualityLabel ? '_'+ format.qualityLabel : '')
             + '.mp4';
 
             // a code to check if the file already exits and then avoid downloading it again
-            if (fs.existsSync(videoTitleFile)) {
-              console.log(`File ${videoTitleFile} already exists, skipping download`);
+            if (fs.existsSync(videoPathFile)) {
+              console.log(`File ${videoPathFile} already exists, skipping download`);
               if (!format.hasVideo || !format.hasAudio) {
-                videosToBeMerged.push(videoTitleFile);
-                console.log(`File ${videoTitleFile} added to merge process`);
+                videosToBeMerged.push(videoPathFile);
+                console.log(`File ${videoPathFile} added to merge process`);
+              } else if (format.hasVideo && format.hasAudio) {
+                console.log(`File ${videoPathFile} added to ready videos`);
+                videosReady.push(videoPathFile);
               }
               continue;
             }
 
-            const writeStream = fs.createWriteStream(`${videoTitleFile}`);
+            const writeStream = fs.createWriteStream(`${videoPathFile}`);
             ytdl(url, options).pipe(writeStream);
 
             await new Promise((resolve, reject) => {
               writeStream.on('finish', () => {
-                console.log(`Download of ${videoTitleFile} finished !`);
+                console.log(`Download of ${videoPathFile} finished !`);
                 resolve('success');
               });
               writeStream.on('error', reject);
             });
 
             if (!format.hasVideo || !format.hasAudio) {
-              videosToBeMerged.push(videoTitleFile);
-              console.log(`File ${videoTitleFile} added to merge process`);
+              videosToBeMerged.push(videoPathFile);
+              console.log(`File ${videoPathFile} added to merge process`);
+            } else if (format.hasVideo && format.hasAudio) {
+              console.log(`File ${videoPathFile} added to ready videos`);
+              videosReady.push(videoPathFile);
             }
 
           }
 
           if (videosToBeMerged.length > 0) {
-            await this.mergeAudioAndVideo(videosToBeMerged);
+            const mergedVideoPath = await this.mergeAudioAndVideo(videosToBeMerged);
+            videosReady.push(mergedVideoPath);
           }
 
-          return new Promise((resolve, reject) => {
-            return resolve('success');
-          })
+          return videosReady;
     }
     catch (error) {
       return new Promise((resolve, reject) => {
@@ -199,9 +243,10 @@ export class AppService {
       const options = {
       }
       const response = await this.downloadVideoYTDL(url, options);
-      return new Promise((resolve, reject) => {
-        return resolve(response);
-      })
+
+      const S3Response = await this.uploadMultipleToS3(response, 'guilhermecanoabucket');
+      console.log('S3Response', S3Response);
+      return (`Success processing videos: ${response.join(' | ')}`);
     } catch (error) {
       return new Promise((resolve, reject) => {
         error.message = `Failed at downloadVideo ${error.message}`;
