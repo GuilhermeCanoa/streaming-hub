@@ -22,6 +22,17 @@
   <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
   [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
 
+
+## PROXIMOS PASSOS
+ * PROXIMOS PASSOS:
+ * INTEGRAÇÃO COM S3 PARA ENVIAR OS VIDEOS EM HD E SD
+  - ERRO DE TIMEOUT - AUMENTAR TIMEOUT PRA DAR TEMPO DE SUBIR VIDEOS MAIORES (PODE SER UM PROBLEMA)
+  - 
+ * INTEGRAÇÃO COM FILA PARA PROCESSAR OS VIDEOS DE TEMPO EM TEMPO E NAO ESTOURAR O LIMITE DO YOUTUBE
+ * APLICAR CLEAN ARCHITECTURE PARA DESACOPLAR AS REGRAS DE NEGOCIO DA BIBLIOTECA YTDL
+ * APLICAR TESTES UNITARIOS
+
+
 ## Description
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
