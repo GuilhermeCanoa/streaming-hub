@@ -50,6 +50,41 @@ export class AppService {
     '720p'
   ]
 
+  async convertToHLS(inputPath: string): Promise<string> {
+    
+    const outputDir = `${__dirname}\\hls`;
+    
+    // Criar pasta para os segmentos
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    return new Promise((resolve, reject) => {
+  
+      ffmpeg.setFfmpegPath(ffmpegStatic as string);
+  
+      ffmpeg(inputPath)
+        .outputOptions([
+          "-preset veryfast",
+          "-g 48", // Intervalo de keyframes
+          "-sc_threshold 0",
+          "-hls_time 6", // Duração de cada segmento
+          "-hls_list_size 0", // Lista de segmentos infinita
+          "-hls_segment_filename", `${outputDir}/segment_%03d.ts`, // Padrão dos segmentos
+        ])
+        .output(`${outputDir}/index.m3u8`)
+        .on("end", () => {
+          console.log("Conversão para HLS concluída!");
+          resolve(`${outputDir}/index.m3u8`);
+        })
+        .on("error", (err) => {
+          console.error("Erro ao converter para HLS:", err);
+          reject(err);
+        })
+        .run();
+    });
+  }
+
   async mergeAudioAndVideo(videosToBeMerged: string[]): Promise<string> {
     try {
       const videoPath = videosToBeMerged.find(v => v.indexOf('_video') !== -1);
@@ -70,8 +105,8 @@ export class AppService {
           .save(outputPath)
           .on("end", () => {
             console.log("Merge completed!");
-            fs.unlinkSync(videoPath);
-            fs.unlinkSync(audioPath);
+            // fs.unlinkSync(videoPath);
+            // fs.unlinkSync(audioPath);
             console.log(`Download and merge completed: ${outputPath}`);
             resolve(`${outputPath}`);
           })
@@ -242,11 +277,15 @@ export class AppService {
       const { url } = querystring;
       const options = {
       }
-      const response = await this.downloadVideoYTDL(url, options);
+      const readyVideosPathInMp4 = await this.downloadVideoYTDL(url, options);
 
-      const S3Response = await this.uploadMultipleToS3(response, 'guilhermecanoabucket');
-      console.log('S3Response', S3Response);
-      return (`Success processing videos: ${response.join(' | ')}`);
+      const readyVideosPathInHLS = await this.convertToHLS(readyVideosPathInMp4[0]);
+      console.log('readyVideosPathInHLS', readyVideosPathInHLS);
+
+
+      // const S3Response = await this.uploadMultipleToS3(response, 'guilhermecanoabucket');
+      // console.log('S3Response', S3Response);
+      return (`Success processing videos: ${readyVideosPathInMp4.join(' | ')}`);
     } catch (error) {
       return new Promise((resolve, reject) => {
         error.message = `Failed at downloadVideo ${error.message}`;
