@@ -46,7 +46,7 @@ export class AppService {
   }
 
   HDQualityLabels: string[] = [
-    '1080p',
+    // '1080p',
     '720p'
   ]
 
@@ -70,8 +70,8 @@ export class AppService {
           .save(outputPath)
           .on("end", () => {
             console.log("Merge completed!");
-            // fs.unlinkSync(videoPath);
-            // fs.unlinkSync(audioPath);
+            fs.unlinkSync(videoPath);
+            fs.unlinkSync(audioPath);
             console.log(`Download and merge completed: ${outputPath}`);
             resolve(`${outputPath}`);
           })
