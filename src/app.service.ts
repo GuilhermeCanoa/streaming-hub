@@ -10,8 +10,26 @@ import { createReadStream } from 'fs';
 @Injectable()
 export class AppService {
 
-  async uploadToS3(filePath: string, bucketName: string): Promise<string> {
+  async uploadFolderToS3(folderPath: string, bucketName: string): Promise<string[]> {
     try {
+      const fileNames = fs.readdirSync(folderPath);
+      const filePaths = fileNames.map(fileName => `${folderPath}/${fileName}`);
+
+      const uploadPromises = filePaths.map(filePath => this.uploadToS3(filePath, bucketName));
+      return await Promise.all(uploadPromises);
+    } catch (error) {
+      console.error('Error uploading folder to S3:', error);
+      throw new Error('Failed to upload folder to S3');
+    }
+  }
+
+  async uploadToS3(filePath: string, bucketName: string, bucketFolder?: string): Promise<string> {
+    try {
+      
+      const videoTitle = filePath.split('/')[3];
+
+      bucketFolder = bucketFolder ? `${bucketFolder}` : `videos/hls/${videoTitle}/`;
+
       const s3Client = new S3Client({
         region: process.env.AWS_REGION || 'sa-east-1'
       });
@@ -21,13 +39,13 @@ export class AppService {
 
       const command = new PutObjectCommand({
         Bucket: bucketName,
-        Key: `videos/${fileName}`,
+        Key: `${bucketFolder}${fileName}`,
         Body: fileStream
       });
 
       await s3Client.send(command);
       
-      return `https://${bucketName}.s3.amazonaws.com/videos/${fileName}`;
+      return `https://${bucketName}.s3.amazonaws.com/${bucketFolder}${fileName}`;
 
     } catch (error) {
       console.error('Error uploading to S3:', error);
@@ -50,6 +68,45 @@ export class AppService {
     '720p'
   ]
 
+  async convertToHLS(inputPath: string): Promise<string> {
+
+    const folderName = inputPath.split('.')[0];
+    
+    const outputDir = `${folderName.replace('mp4', 'hls')}`;
+    
+    // Criar pasta para os segmentos
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    } else {
+      return `${outputDir}`;
+    }
+
+    return new Promise((resolve, reject) => {
+  
+      ffmpeg.setFfmpegPath(ffmpegStatic as string);
+  
+      ffmpeg(inputPath)
+        .outputOptions([
+          "-preset veryfast",
+          "-g 48", // Intervalo de keyframes
+          "-sc_threshold 0",
+          "-hls_time 6", // Duração de cada segmento
+          "-hls_list_size 0", // Lista de segmentos infinita
+          "-hls_segment_filename", `${outputDir}/segment_%03d.ts`, // Padrão dos segmentos
+        ])
+        .output(`${outputDir}/index.m3u8`)
+        .on("end", () => {
+          console.log("Conversão para HLS concluída!");
+          resolve(`${outputDir}`);
+        })
+        .on("error", (err) => {
+          console.error("Erro ao converter para HLS:", err);
+          reject(err);
+        })
+        .run();
+    });
+  }
+
   async mergeAudioAndVideo(videosToBeMerged: string[]): Promise<string> {
     try {
       const videoPath = videosToBeMerged.find(v => v.indexOf('_video') !== -1);
@@ -70,8 +127,8 @@ export class AppService {
           .save(outputPath)
           .on("end", () => {
             console.log("Merge completed!");
-            fs.unlinkSync(videoPath);
-            fs.unlinkSync(audioPath);
+            // fs.unlinkSync(videoPath);
+            // fs.unlinkSync(audioPath);
             console.log(`Download and merge completed: ${outputPath}`);
             resolve(`${outputPath}`);
           })
@@ -159,8 +216,11 @@ export class AppService {
           for (const format of selectedFormats) {
             options.format = format;
             // console.log('Downloading video with format:', format);
+
+            const videoFolder = `videos/mp4/${videoTitle}/`;
             
-            const videoPathFile = videoTitle
+            const videoPathFile = videoFolder
+            + videoTitle
             + (format.hasVideo ? '_video' : '')
             + (format.hasAudio ? '_audio' : '')
             + (format.qualityLabel ? '_'+ format.qualityLabel : '')
@@ -177,6 +237,9 @@ export class AppService {
                 videosReady.push(videoPathFile);
               }
               continue;
+            } else {
+              // create folder if not exists
+              fs.mkdirSync(`${videoFolder}`, { recursive: true });
             }
 
             const writeStream = fs.createWriteStream(`${videoPathFile}`);
@@ -242,11 +305,21 @@ export class AppService {
       const { url } = querystring;
       const options = {
       }
-      const response = await this.downloadVideoYTDL(url, options);
+      const readyVideosPathInMp4 = await this.downloadVideoYTDL(url, options);
 
-      const S3Response = await this.uploadMultipleToS3(response, 'guilhermecanoabucket');
-      console.log('S3Response', S3Response);
-      return (`Success processing videos: ${response.join(' | ')}`);
+      const readyVideosPathInHLS = [];
+      for (const videoPath of readyVideosPathInMp4) {
+          const videoHLS = await this.convertToHLS(videoPath);
+          readyVideosPathInHLS.push(videoHLS);
+          console.log('readyVideosPathInHLS', readyVideosPathInHLS);
+      }
+
+      for (const videoPath of readyVideosPathInHLS) {
+        const videoS3 = await this.uploadFolderToS3(videoPath, 'guilhermecanoabucket');
+        console.log('videoS3', videoS3);
+      }
+
+      return (`Success processing videos: ${readyVideosPathInMp4.join(' | ')}`);
     } catch (error) {
       return new Promise((resolve, reject) => {
         error.message = `Failed at downloadVideo ${error.message}`;
