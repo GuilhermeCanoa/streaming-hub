@@ -4,7 +4,7 @@ import ytdl from "@distube/ytdl-core";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegStatic from "ffmpeg-static"; // Provides a static FFmpeg binary
 
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { createReadStream } from 'fs';
 
 @Injectable()
@@ -315,6 +315,7 @@ export class AppService {
       }
 
       for (const videoPath of readyVideosPathInHLS) {
+        console.log('Starting S3 upload')
         const videoS3 = await this.uploadFolderToS3(videoPath, 'guilhermecanoabucket');
         console.log('videoS3', videoS3);
       }
@@ -327,4 +328,38 @@ export class AppService {
       })
     }
   }
+
+  async listVideos(): Promise<string[]> {
+    try {
+      const s3Client = new S3Client({
+        region: process.env.AWS_REGION || 'sa-east-1'
+      });
+
+      const bucketName = 'guilhermecanoabucket';
+      const prefix = 'videos/hls/';
+
+      const command = new ListObjectsV2Command({
+        Bucket: bucketName,
+        Prefix: prefix
+      });
+
+      const response = await s3Client.send(command);
+      
+      const urls: string[] = [];
+      
+      response.Contents?.forEach(object => {
+        if (object.Key?.endsWith('index.m3u8')) {
+          const url = `https://${bucketName}.s3.amazonaws.com/${object.Key}`;
+          urls.push(url);
+        }
+      });
+
+      console.log('list videos response', urls);
+      return urls;
+
+    } catch (error) {
+      console.error('Error listing videos:', error);
+      throw new Error('Failed to list videos from S3');
+    }
+  }  
 }
