@@ -19,14 +19,11 @@ RUN npm install
 # Copia o restante do código para dentro do container
 COPY . .
 
-# # Copia variaveis da AWS pro container
-# COPY ~/.aws /root/.aws
-
 # Expõe a porta 3000 (a mesma que o Nest usa por padrão)
 EXPOSE 3000
 
-# Definindo a variável de ambiente para permitir acesso externo
-ENV HOST=0.0.0.0
+# # Definindo a variável de ambiente para permitir acesso externo
+# ENV HOST=0.0.0.0
 
 # Comando para iniciar a aplicação
 CMD ["npm", "run", "start"]
